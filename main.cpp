@@ -1,130 +1,115 @@
-#include <SoapySDR/Device.h>
-#include <SoapySDR/Formats.h>
-#include <stdio.h>
-#include <stdlib.h>
+#include <SoapySDR/Device.h>   
+#include <SoapySDR/Formats.h>  
+#include <stdlib.h>            
 #include <stdint.h>
 #include <complex.h>
+#include <stdio.h>
 
-int16_t *read_pcm(const char *filename, size_t *sample_count)
-{
-    FILE *file = fopen(filename, "rb");
-    
-    fseek(file, 0, SEEK_END);
-    long file_size = ftell(file);
-    fseek(file, 0, SEEK_SET);
-    printf("file_size = %ld\n", file_size);
-    
-    *sample_count = file_size / sizeof(int16_t);
-    int16_t *samples = (int16_t *)malloc(file_size);
-    size_t sf = fread(samples, sizeof(int16_t), *sample_count, file);
-    
-    if (sf == 0){
-        printf("file %s empty!", filename);
-    }
-    
-    fclose(file);
-    
-    return samples;
-}
-
-int main()
-{
-    SoapySDRKwargs args = {};
-    SoapySDRKwargs_set(&args, "driver", "plutosdr");
-    SoapySDRKwargs_set(&args, "uri", "usb:");
-    SoapySDRKwargs_set(&args, "direct", "1");
-    SoapySDRKwargs_set(&args, "timestamp_every", "1920");
-    SoapySDRKwargs_set(&args, "loopback", "0");
-    SoapySDRDevice *sdr = SoapySDRDevice_make(&args);
-    SoapySDRKwargs_clear(&args);
-
-    int sample_rate = 1e6;
-    int carrier_freq = 800e6;
-    
-    // Параметры RX и TX
-    SoapySDRDevice_setSampleRate(sdr, SOAPY_SDR_RX, 0, sample_rate);
-    SoapySDRDevice_setFrequency(sdr, SOAPY_SDR_RX, 0, carrier_freq, NULL);
-    SoapySDRDevice_setSampleRate(sdr, SOAPY_SDR_TX, 0, sample_rate);
-    SoapySDRDevice_setFrequency(sdr, SOAPY_SDR_TX, 0, carrier_freq, NULL);
-
-    size_t channels[] = {0};
-    SoapySDRDevice_setGain(sdr, SOAPY_SDR_RX, 0, 40.0);
-    SoapySDRDevice_setGain(sdr, SOAPY_SDR_TX, 0, -7.0);
-
-    size_t channel_count = 1;
-    SoapySDRStream *rxStream = SoapySDRDevice_setupStream(sdr, SOAPY_SDR_RX, SOAPY_SDR_CS16, channels, channel_count, NULL);
-    SoapySDRStream *txStream = SoapySDRDevice_setupStream(sdr, SOAPY_SDR_TX, SOAPY_SDR_CS16, channels, channel_count, NULL);
-
-    SoapySDRDevice_activateStream(sdr, rxStream, 0, 0, 0);
-    SoapySDRDevice_activateStream(sdr, txStream, 0, 0, 0);
-    
-    size_t rx_mtu = SoapySDRDevice_getStreamMTU(sdr, rxStream);
-    size_t tx_mtu = SoapySDRDevice_getStreamMTU(sdr, txStream);
-
-    // Чтение PCM файла
-    const char *pcm_filename = "1.pcm";
-    size_t sample_count = 0;
-    int16_t *samples = read_pcm(pcm_filename, &sample_count);
-
-    size_t samples_per_buffer = tx_mtu * 2;
-    size_t num_buffers = sample_count / samples_per_buffer;
-    size_t remainder = sample_count % samples_per_buffer;
-
-    if (remainder > 0) {
-        num_buffers++;
-    }
-
-    int16_t *rx_buffer = (int16_t *)malloc(rx_mtu * 2 * sizeof(int16_t));
-    void *rx_buffs[] = {rx_buffer};
-    FILE *output_file = fopen("2.pcm", "wb");
-
-    const long timeoutUs = 400000;
-    long long last_time = 0;
-
-    printf("Starting PCM transmission...\n");
-    printf("Total samples: %zu, Buffers: %zu\n", sample_count, num_buffers);
-
-    // Основной цикл передачи/приема
-    for (size_t buffer_idx = 0; buffer_idx < num_buffers; buffer_idx++)
-    {
-        int flags = 0;
-        long long timeNs = 0;
-        
-        // Прием данных
-        int sr = SoapySDRDevice_readStream(sdr, rxStream, rx_buffs, rx_mtu, &flags, &timeNs, timeoutUs);
-        
-        if (sr > 0) {
-            fwrite(rx_buffer, sizeof(int16_t), sr * 2, output_file);
+void to_bpsk(int bits[], int count, float I_bpsk[], float Q_bpsk[]){
+        for (int i = 0; i < count; i++){
+            if (bits[i] == 0){    
+                I_bpsk[i] = 1.0;   
+                Q_bpsk[i] = 0.0;
+            }
+            else  {
+                I_bpsk[i] = -1.0;    
+                Q_bpsk[i] = 0.0;
+            }
+            printf("(%.1f,%.1f) ", I_bpsk[i], Q_bpsk[i]);
         }
-        
-        // Передача данных
-        size_t current_samples = (buffer_idx == num_buffers - 1 && remainder > 0) ? 
-                               remainder : samples_per_buffer;
-        
-        const void *tx_buff = samples + (buffer_idx * samples_per_buffer);
-        
-        int tx_flags = SOAPY_SDR_HAS_TIME;
-        long long tx_time = timeNs + (4 * 1000 * 1000);
-        
-        int st = SoapySDRDevice_writeStream(sdr, txStream, &tx_buff, 
-                                          current_samples / 2,
-                                          &tx_flags, tx_time, timeoutUs);
-        
-        printf("Buffer: %zu - RX: %i, TX: %i\n", buffer_idx, sr, st);
-        
-        last_time = tx_time;
+        printf("\n");
+    }   
+
+void upsampling(int duration, int count, float I_bpsk[], float Q_bpsk[], float I_upsampled[], float Q_upsampled[]){
+    int index = 0;
+    for (int i = 0; i < count; i++){   //новый массив увеличенный в 10 раз
+        for (int sample = 0; sample < duration; sample++){
+            if (sample == duration - 1){
+            //if (sample == duration - 9){
+                I_upsampled[index] = I_bpsk[i];
+                Q_upsampled[index] = Q_bpsk[i];
+            }
+            else{
+                I_upsampled[index] = 0.0;
+                Q_upsampled[index] = 0.0;
+            }
+            index++;
+        }
     }
-
-    // Завершение
-    fclose(output_file);
-    free(rx_buffer);
-    free(samples);
-
-    SoapySDRDevice_deactivateStream(sdr, rxStream, 0, 0);
-    SoapySDRDevice_deactivateStream(sdr, txStream, 0, 0);
-    SoapySDRDevice_closeStream(sdr, rxStream);
-    SoapySDRDevice_closeStream(sdr, txStream);
-    SoapySDRDevice_unmake(sdr);
-
-    return 0;
 }
+
+void filter(int sample, float I_upsampled[], float Q_upsampled[], float I_filtred[], float Q_filtred[]){
+    int length = 10;
+
+    for (int i = 0; i < sample; i++){
+        if (i % length == length - 1){
+            float current_I = I_upsampled[i];
+            float current_Q = Q_upsampled[i];
+
+            for (int j = 0; j < length; j++){
+                I_filtred[i - j] = current_I;
+                Q_filtred[i - j] = current_Q;
+            }
+        }
+    }
+} // Копируем каждый 10-ый элемент в предыдущие позиции
+
+void sdvig(int sample, float I_filtred[], float Q_filtred[]){
+    for (int i = 0; i < sample; i++){
+        I_filtred[i] = I_filtred[i] * 2047 * 16;  
+        Q_filtred[i] = Q_filtred[i] * 2047 * 16;
+    } 
+}
+
+void to_buff(float I_filtred[], float Q_filtred[], int16_t tx_buff[], int sample){
+    for (int i = 0; i < sample; i++){
+        tx_buff[2*i] = (int16_t)I_filtred[i];
+        tx_buff[2*i + 1] = (int16_t)Q_filtred[i];
+    }
+}
+
+int main(){
+    int bits[] = {0,1,0,1,1,0,1,1,0,1};
+    int count = 10; //количество битов
+    int duration = 10; //количество семплов на символ
+    int sample = count * duration;
+    
+    float I_bpsk[count];
+    float Q_bpsk[count];
+
+    float I_upsampled[sample];
+    float Q_upsampled[sample];
+
+    float I_filtred[sample];
+    float Q_filtred[sample];
+
+    to_bpsk(bits, count, I_bpsk, Q_bpsk);
+
+    upsampling(duration, count, I_bpsk, Q_bpsk, I_upsampled, Q_upsampled);
+
+    filter(sample, I_upsampled, Q_upsampled, I_filtred, Q_filtred);
+
+    sdvig(sample, I_filtred, Q_filtred);
+    
+    int16_t tx_buff[2*1920];
+
+    to_buff(I_filtred, Q_filtred, tx_buff, sample);
+
+    //первые 8 ячеек для timestamp
+    for(size_t i = 0; i < 2; i++){
+        tx_buff[0 + i] = 0xffff;
+        // 8 x timestamp words
+        tx_buff[10 + i] = 0xffff;
+    }
+    long long timeNs; //timestamp for receive buffer
+     // Переменная для времени отправки сэмплов относительно текущего приема
+    long long tx_time = timeNs + (4 * 1000 * 1000); // на 4 [мс] в будущее
+
+    // Добавляем время, когда нужно передать блок tx_buff, через tx_time -наносекунд
+    for(size_t i = 0; i < 8; i++)
+    {
+        uint8_t tx_time_byte = (tx_time >> (i * 8)) & 0xff;
+        tx_buff[2 + i] = tx_time_byte << 4;
+    }
+}
+
