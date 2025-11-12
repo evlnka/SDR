@@ -52,13 +52,13 @@ int main(){
     int16_t tx_buff[2*tx_mtu];
     int16_t rx_buffer[2*rx_mtu];
 
-        //Прямоугольный сигнал
+        //Треугольный сигнал
         for (int i = 0; i < 2 * tx_mtu; i+=2)
         {
             double t = (double)(i / 2) / tx_mtu * 2.0 - 1.0;
-            double rect_value = (fabs(t) < 0.8) ? 1.0 : 0.0;
-            tx_buff[i] = (int16_t)(rect_value * 16000);   // I — прямоугольник
-            tx_buff[i + 1] = 0; // Q = 0
+            double triangle_value = -(1.0 - fabs(t)) * (fabs(t) < 1.0);
+            tx_buff[i] = (int16_t)(triangle_value * 16000);   // I - треугольник
+            tx_buff[i+1] = (int16_t)(triangle_value * 16000); // Q = 0
         }
 
         for(size_t i = 0; i < 2; i++)
