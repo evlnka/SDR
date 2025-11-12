@@ -1,0 +1,23 @@
+# Исполняемые файлы
+*.exe
+*.out
+
+# Объектные файлы
+*.o
+*.obj
+
+# Библиотеки
+*.so
+*.a
+
+# Файлы сборки
+CMakeFiles/
+cmake_install.cmake
+CMakeCache.txt
+
+# Файлы IDE
+.vscode/
+.idea/
+
+# Системные файлы
+.DS_Store
