@@ -66,8 +66,8 @@ void convolution(int sample, float I_upsampled[], float Q_upsampled[], float I_f
 
 void sdvig(int sample, float I_filtred[], float Q_filtred[]){
     for (int i = 0; i < sample; i++){
-        I_filtred[i] = I_filtred[i] * 2047 * 16; 
-        Q_filtred[i] = Q_filtred[i] * 2047 * 16;
+        I_filtred[i] = I_filtred[i] * 2047 * 16 * 0.1; 
+        Q_filtred[i] = Q_filtred[i] * 2047 * 16 * 0.1; 
     } 
 }
 
@@ -123,8 +123,12 @@ int main(){
     int16_t tx_buff[2 * tx_mtu] = {0}; 
     int16_t rx_buff[2 * rx_mtu] = {0};
 
-    int bits[] = {0,1,0,1,1,0,1,1,0,1};
-    int count = 10;      //количество битов
+    //int bits[] = {0,1,0,1,1,0,1,1,0,1};
+    int bits[100];
+   for (int i = 0; i < 100; i++)
+        bits[i] = rand() % 2;
+
+    int count = 100;      //количество битов
     int duration = 10;   //количество семплов на символ
     int sample = count * duration;
     
@@ -162,7 +166,7 @@ int main(){
     
     const long  timeoutUs = 400000;
     long long last_time = 0;
-    size_t iteration_count = 10;
+    size_t iteration_count = sample;
 
     FILE *file = fopen("txdata.pcm", "wb");
     //получение и отправка сэмплов
@@ -175,6 +179,7 @@ int main(){
         // считали буффер RX, записали его в rx_buffer
         int sr = SoapySDRDevice_readStream(sdr, rxStream, rx_buffs, 1920, &flags, &timeNs, timeoutUs);
         fwrite(rx_buff, 2* rx_mtu * sizeof(int16_t), 1, file);
+        
         // Смотрим на количество считаных сэмплов, времени прихода и разницы во времени с чтением прошлого буфера
         printf("Buffer: %lu - Samples: %i, Flags: %i, Time: %lli, TimeDiff: %lli\n", buffers_read, sr, flags, timeNs, timeNs - last_time);
         last_time = timeNs;
